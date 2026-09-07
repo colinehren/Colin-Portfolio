@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Colin Ehrentraud — Architecture Portfolio</title>
+  <meta name="description" content="Colin Ehrentraud — Architecture Portfolio 2026">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    #viewer {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+    }
+    #book {
+      width: min(94vw, 1200px);
+      height: min(94vh, 1696px);
+      transform-origin: center center;
+    }
+    /* Sits directly on top of #book. Only shown while zoomed in, so it physically
+       intercepts all drag input for panning — page-flip never sees it, regardless
+       of whether page-flip listens for mouse, touch, or pointer events. */
+    #panOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      display: none;
+      cursor: grab;
+      touch-action: none;
+    }
+    #panOverlay.active { display: block; }
+    #panOverlay.grabbing { cursor: grabbing; }
+    .page {
+      background: #fff;
+      overflow: hidden;
+    }
+    .page canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #fff;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 14px;
+      background: #111;
+      font-size: 14px;
+      letter-spacing: .04em;
+    }
+    #progress {
+      width: 220px;
+      height: 2px;
+      background: #444;
+      overflow: hidden;
+    }
+    #bar {
+      width: 0;
+      height: 100%;
+      background: #fff;
+      transition: width .2s ease;
+    }
+    #controls {
+      position: fixed;
+      z-index: 20;
+      left: 50%;
+      bottom: max(18px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(20,20,20,.82);
+      backdrop-filter: blur(10px);
+      opacity: .15;
+      transition: opacity .25s ease;
+    }
+    #controls:hover, #controls:focus-within { opacity: 1; }
+    button {
+      border: 0;
+      background: transparent;
+      color: #fff;
+      cursor: pointer;
+      font-size: 18px;
+      width: 34px;
+      height: 30px;
+      border-radius: 5px;
+    }
+    button:hover { background: rgba(255,255,255,.12); }
+    #counter {
+      min-width: 58px;
+      text-align: center;
+      font-size: 12px;
+      letter-spacing: .05em;
+    }
+    #hint {
+      position: fixed;
+      z-index: 15;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,.55);
+      font-size: 11px;
+      pointer-events: none;
+      transition: opacity .4s ease;
+    }
+    @media (max-width: 700px) {
+      #book { width: 100vw; height: 100vh; }
+      #controls { opacity: .8; }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer">
+    <div id="book"></div>
+    <div id="panOverlay"></div>
+  </div>
+
+  <div id="loading">
+    <div>Loading portfolio</div>
+    <div id="progress"><div id="bar"></div></div>
+    <div id="status">Preparing PDF…</div>
+  </div>
+
+  <div id="hint">Click or drag a page to turn it — scroll to zoom, drag to pan when zoomed</div>
+
+  <div id="controls" aria-label="Portfolio controls">
+    <button id="first" aria-label="Skip to first page">⏮</button>
+    <button id="prev" aria-label="Previous page">‹</button>
+    <div id="counter">1 / 56</div>
+    <button id="next" aria-label="Next page">›</button>
+    <button id="last" aria-label="Skip to last page">⏭</button>
+    <button id="fullscreen" aria-label="Fullscreen">⛶</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+  <script type="module">
+    import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+
+    const PDF_URL = "./portfolio.pdf";
+    const loading = document.getElementById("loading");
+    const status = document.getElementById("status");
+    const bar = document.getElementById("bar");
+    const bookEl = document.getElementById("book");
+    const counter = document.getElementById("counter");
+
+    let pdf;
+    let pageFlip;
+    let rendering = new Set();
+
+    async function renderPage(index) {
+      if (index < 0 || index >= pdf.numPages || rendering.has(index)) return;
+      const pageEl = document.querySelector(`[data-page="${index}"]`);
+      if (!pageEl || pageEl.dataset.rendered === "1") return;
+
+      rendering.add(index);
+      try {
+        const page = await pdf.getPage(index + 1);
+        const canvas = pageEl.querySelector("canvas");
+
+        // Render at a higher internal resolution for crisp zooming.
+        const base = page.getViewport({ scale: 1 });
+        const targetWidth = Math.min(1800, Math.max(1000, bookEl.clientWidth * 1.6));
+        const scale = targetWidth / base.width;
+        const viewport = page.getViewport({ scale });
+
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+
+        await page.render({
+          canvasContext: canvas.getContext("2d", { alpha: false }),
+          viewport
+        }).promise;
+
+        pageEl.dataset.rendered = "1";
+      } finally {
+        rendering.delete(index);
+      }
+    }
+
+    async function preloadAround(index) {
+      await Promise.all([
+        renderPage(index),
+        renderPage(index + 1),
+        renderPage(index - 1),
+        renderPage(index + 2)
+      ]);
+    }
+
+    async function init() {
+      status.textContent = "Opening PDF…";
+
+      pdf = await pdfjsLib.getDocument({
+        url: PDF_URL,
+        rangeChunkSize: 1024 * 1024,
+        disableAutoFetch: false
+      }).promise;
+
+      counter.textContent = `1 / ${pdf.numPages}`;
+
+      // Create one page container per PDF page.
+      for (let i = 0; i < pdf.numPages; i++) {
+        const page = document.createElement("div");
+        page.className = "page";
+        page.dataset.page = i;
+        page.innerHTML = "<canvas></canvas>";
+        bookEl.appendChild(page);
+      }
+
+      // Your PDF is portrait A4-sized (595.276 × 841.89 pt).
+      pageFlip = new St.PageFlip(bookEl, {
+        width: 595,
+        height: 842,
+        size: "stretch",
+        minWidth: 280,
+        maxWidth: 1200,
+        minHeight: 396,
+        maxHeight: 1696,
+        showCover: true,
+        mobileScrollSupport: false,
+        drawShadow: true,
+        flippingTime: 450,
+        usePortrait: true,
+        startPage: 0,
+        maxShadowOpacity: 0.25
+      });
+
+      pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+
+      pageFlip.on("flip", async (e) => {
+        const index = e.data;
+        counter.textContent = `${index + 1} / ${pdf.numPages}`;
+        resetZoom();
+        await preloadAround(index);
+      });
+
+      pageFlip.on("changeState", () => {
+        const index = pageFlip.getCurrentPageIndex();
+        counter.textContent = `${index + 1} / ${pdf.numPages}`;
+      });
+
+      await preloadAround(0);
+
+      bar.style.width = "100%";
+      status.textContent = "Ready";
+      setTimeout(() => loading.remove(), 250);
+      setTimeout(() => {
+        document.getElementById("hint").style.opacity = "0";
+      }, 4500);
+    }
+
+    document.getElementById("prev").onclick = () => pageFlip?.flipPrev();
+    document.getElementById("next").onclick = () => pageFlip?.flipNext();
+    // flip() can be unreliable jumping many pages backward to the cover, so use
+    // the library's instant turnToPage for the skip-to-first control.
+    document.getElementById("first").onclick = () => pageFlip?.turnToPage(0);
+    document.getElementById("last").onclick = () => pageFlip && pageFlip.flip(pdf.numPages - 1);
+
+    document.getElementById("fullscreen").onclick = async () => {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    };
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") pageFlip?.flipPrev();
+      if (e.key === "ArrowRight") pageFlip?.flipNext();
+      if (e.key === "f" || e.key === "F") document.getElementById("fullscreen").click();
+    });
+
+    // --- Scroll-wheel zoom (max 2x) with drag-to-pan while zoomed ---
+    const viewerEl = document.getElementById("viewer");
+    const panOverlay = document.getElementById("panOverlay");
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 2;
+    let zoomLevel = 1;
+    let panX = 0;
+    let panY = 0;
+
+    function clampPan() {
+      const scaledW = bookEl.offsetWidth * zoomLevel;
+      const scaledH = bookEl.offsetHeight * zoomLevel;
+      const maxX = Math.max(0, (scaledW - viewerEl.clientWidth) / 2);
+      const maxY = Math.max(0, (scaledH - viewerEl.clientHeight) / 2);
+      panX = Math.min(maxX, Math.max(-maxX, panX));
+      panY = Math.min(maxY, Math.max(-maxY, panY));
+    }
+
+    function applyZoom() {
+      clampPan();
+      bookEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+      // The overlay only appears while zoomed in. Page-flip's own drag-to-flip
+      // listeners sit on the book itself, so with the overlay hidden at 1x zoom
+      // they get input normally and completely undisturbed.
+      panOverlay.classList.toggle("active", zoomLevel > 1);
+    }
+
+    function resetZoom() {
+      zoomLevel = 1;
+      panX = 0;
+      panY = 0;
+      bookEl.style.transition = "transform .2s ease";
+      applyZoom();
+    }
+
+    viewerEl.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      bookEl.style.transition = "transform .15s ease-out";
+      const delta = -e.deltaY * 0.0015;
+      zoomLevel = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel + delta));
+      applyZoom();
+    }, { passive: false });
+
+    // Drag-to-pan: the overlay physically sits in front of the book while zoomed,
+    // so it receives the drag directly and page-flip never sees it at all.
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
+
+    panOverlay.addEventListener("pointerdown", (e) => {
+      isPanning = true;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panOriginX = panX;
+      panOriginY = panY;
+      bookEl.style.transition = "none";
+      panOverlay.classList.add("grabbing");
+      panOverlay.setPointerCapture(e.pointerId);
+    });
+
+    panOverlay.addEventListener("pointermove", (e) => {
+      if (!isPanning) return;
+      panX = panOriginX + (e.clientX - panStartX);
+      panY = panOriginY + (e.clientY - panStartY);
+      clampPan();
+      bookEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    });
+
+    function endPan() {
+      isPanning = false;
+      panOverlay.classList.remove("grabbing");
+    }
+    panOverlay.addEventListener("pointerup", endPan);
+    panOverlay.addEventListener("pointercancel", endPan);
+    panOverlay.addEventListener("pointerleave", endPan);
+
+    // Let the browser report a useful loading state while PDF.js fetches the file.
+    const interval = setInterval(() => {
+      if (!pdf) {
+        const p = Math.min(90, parseFloat(bar.style.width || "0") + 1);
+        bar.style.width = p + "%";
+      } else {
+        clearInterval(interval);
+      }
+    }, 100);
+
+    init().catch(err => {
+      console.error(err);
+      status.textContent = "Could not load the portfolio.";
+      bar.style.width = "0";
+    });
+  </script>
+</body>
+</html>
