@@ -124,6 +124,27 @@
       pointer-events: none;
       transition: opacity .4s ease;
     }
+    #exitFullscreen {
+      position: fixed;
+      z-index: 25;
+      top: max(14px, env(safe-area-inset-top));
+      right: max(14px, env(safe-area-inset-right));
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(20,20,20,.75);
+      backdrop-filter: blur(10px);
+      color: #fff;
+      border: 0;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #exitFullscreen.visible { display: flex; }
+    #exitFullscreen:hover { background: rgba(255,255,255,.18); }
     @media (max-width: 700px), (max-height: 700px) {
       #controls { opacity: .8; }
     }
@@ -142,6 +163,8 @@
   </div>
 
   <div id="hint">Click or drag a page to turn it — scroll or pinch to zoom, drag to pan when zoomed</div>
+
+  <button id="exitFullscreen" aria-label="Exit full screen">✕</button>
 
   <div id="controls" aria-label="Portfolio controls">
     <button id="first" aria-label="Skip to first page">
@@ -180,6 +203,10 @@
     let pageFlip;
     let rendering = new Set();
 
+    function isCurrentlyFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
     // CSS viewport units (vh/svh/dvh) turned out not to be trustworthy enough
     // here: iOS WebKit (Safari and, since it's the same engine under the
     // hood, Firefox for iOS too) doesn't reliably shrink them to the space
@@ -188,12 +215,26 @@
     // specifically to solve this — it reports the real, currently-visible
     // pixel area, toolbar and all, and iOS keeps it live. We size #book from
     // that directly instead of relying on CSS to get it right.
+    //
+    // In mobile landscape specifically, the reported height still isn't
+    // trustworthy enough in practice to guarantee no cropping — so as a
+    // pragmatic safety margin we deliberately size the book to 90% there,
+    // giving it slack regardless of exactly how far off the browser's own
+    // numbers are. True fullscreen has no toolbar to misreport in the first
+    // place, so it skips this and uses the full screen edge-to-edge.
     function sizeBook() {
       const vv = window.visualViewport;
       const vw = vv ? vv.width : window.innerWidth;
       const vh = vv ? vv.height : window.innerHeight;
       const small = vw <= 700 || vh <= 700;
-      const margin = small ? 1 : 0.94;
+      const landscape = vw > vh;
+      const fullscreen = isCurrentlyFullscreen();
+      let margin;
+      if (small) {
+        margin = (landscape && !fullscreen) ? 0.90 : 1;
+      } else {
+        margin = 0.94;
+      }
       const w = Math.min(vw * margin, 1200);
       const h = Math.min(vh * margin, 1696);
       bookEl.style.width = w + "px";
@@ -334,13 +375,47 @@
     document.getElementById("first").onclick = () => pageFlip?.turnToPage(0);
     document.getElementById("last").onclick = () => pageFlip && pageFlip.flip(pdf.numPages - 1);
 
-    document.getElementById("fullscreen").onclick = async () => {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen?.();
-      } else {
-        await document.exitFullscreen?.();
+    // iOS Safari only gained proper Fullscreen API support in 16.4 (spring
+    // 2023) and some older WebKit-based browsers still expect the prefixed
+    // form, so try both. If neither exists, just hide the button — it
+    // wouldn't do anything.
+    const fsBtn = document.getElementById("fullscreen");
+    const exitFsBtn = document.getElementById("exitFullscreen");
+
+    function fullscreenSupported() {
+      return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    }
+
+    async function enterFullscreen() {
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req) return;
+      try {
+        await req.call(el, { navigationUI: "hide" });
+      } catch {
+        try { await req.call(el); } catch { /* not supported here; give up quietly */ }
       }
-    };
+    }
+
+    async function exitFullscreenNow() {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (!exit) return;
+      try { await exit.call(document); } catch { /* already out, ignore */ }
+    }
+
+    if (!fullscreenSupported()) {
+      fsBtn.style.display = "none";
+    } else {
+      fsBtn.onclick = () => (isCurrentlyFullscreen() ? exitFullscreenNow() : enterFullscreen());
+      exitFsBtn.onclick = () => exitFullscreenNow();
+
+      const onFullscreenChange = () => {
+        exitFsBtn.classList.toggle("visible", isCurrentlyFullscreen());
+        sizeBook();
+      };
+      document.addEventListener("fullscreenchange", onFullscreenChange);
+      document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    }
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "ArrowLeft") pageFlip?.flipPrev();
