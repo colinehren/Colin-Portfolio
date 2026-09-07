@@ -25,6 +25,7 @@
       width: min(94vw, 1200px);
       height: min(94vh, 1696px);
       transform-origin: center center;
+      touch-action: none;
     }
     /* Sits directly on top of #book. Only shown while zoomed in, so it physically
        intercepts all drag input for panning — page-flip never sees it, regardless
@@ -101,6 +102,9 @@
       width: 34px;
       height: 30px;
       border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     button:hover { background: rgba(255,255,255,.12); }
     #counter {
@@ -120,7 +124,7 @@
       pointer-events: none;
       transition: opacity .4s ease;
     }
-    @media (max-width: 700px) {
+    @media (max-width: 700px), (max-height: 700px) {
       #book { width: 100vw; height: 100vh; }
       #controls { opacity: .8; }
     }
@@ -138,14 +142,24 @@
     <div id="status">Preparing PDF…</div>
   </div>
 
-  <div id="hint">Click or drag a page to turn it — scroll to zoom, drag to pan when zoomed</div>
+  <div id="hint">Click or drag a page to turn it — scroll or pinch to zoom, drag to pan when zoomed</div>
 
   <div id="controls" aria-label="Portfolio controls">
-    <button id="first" aria-label="Skip to first page">⏮</button>
+    <button id="first" aria-label="Skip to first page">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <rect x="4" y="4" width="2.6" height="16" rx="1"/>
+        <path d="M20 4 8 12l12 8z"/>
+      </svg>
+    </button>
     <button id="prev" aria-label="Previous page">‹</button>
     <div id="counter">1 / 56</div>
     <button id="next" aria-label="Next page">›</button>
-    <button id="last" aria-label="Skip to last page">⏭</button>
+    <button id="last" aria-label="Skip to last page">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M4 4l12 8-12 8z"/>
+        <rect x="17.4" y="4" width="2.6" height="16" rx="1"/>
+      </svg>
+    </button>
     <button id="fullscreen" aria-label="Fullscreen">⛶</button>
   </div>
 
@@ -338,6 +352,7 @@
     let panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
 
     panOverlay.addEventListener("pointerdown", (e) => {
+      if (pinchActive) return; // a pinch is already in progress with another finger
       isPanning = true;
       panStartX = e.clientX;
       panStartY = e.clientY;
@@ -349,7 +364,7 @@
     });
 
     panOverlay.addEventListener("pointermove", (e) => {
-      if (!isPanning) return;
+      if (!isPanning || pinchActive) return;
       panX = panOriginX + (e.clientX - panStartX);
       panY = panOriginY + (e.clientY - panStartY);
       clampPan();
@@ -363,6 +378,63 @@
     panOverlay.addEventListener("pointerup", endPan);
     panOverlay.addEventListener("pointercancel", endPan);
     panOverlay.addEventListener("pointerleave", endPan);
+
+    // --- Pinch-to-zoom (mobile). Tracked in the capture phase on the viewer so it
+    // sees every touch regardless of what page-flip or the pan overlay do with it.
+    // Single-finger touches are only observed here (never intercepted), so normal
+    // drag-to-flip and drag-to-pan are completely unaffected — this only takes
+    // over once a SECOND finger joins, which is an unambiguous, distinct gesture.
+    const activePointers = new Map();
+    let pinchActive = false;
+    let pinchStartDist = null;
+    let pinchStartZoom = 1;
+    let pinchStartPanX = 0;
+    let pinchStartPanY = 0;
+
+    function pointerDist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    viewerEl.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.size === 2) {
+        pinchActive = true;
+        isPanning = false;
+        const pts = [...activePointers.values()];
+        pinchStartDist = pointerDist(pts[0], pts[1]);
+        pinchStartZoom = zoomLevel;
+        pinchStartPanX = panX;
+        pinchStartPanY = panY;
+        bookEl.style.transition = "none";
+      }
+    }, true);
+
+    viewerEl.addEventListener("pointermove", (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchActive && activePointers.size === 2 && pinchStartDist) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pts = [...activePointers.values()];
+        const dist = pointerDist(pts[0], pts[1]);
+        zoomLevel = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinchStartZoom * (dist / pinchStartDist)));
+        panX = pinchStartPanX;
+        panY = pinchStartPanY;
+        applyZoom();
+      }
+    }, true);
+
+    function releaseTouchPointer(e) {
+      if (e.pointerType !== "touch") return;
+      activePointers.delete(e.pointerId);
+      if (activePointers.size < 2) {
+        pinchActive = false;
+        pinchStartDist = null;
+      }
+    }
+    viewerEl.addEventListener("pointerup", releaseTouchPointer, true);
+    viewerEl.addEventListener("pointercancel", releaseTouchPointer, true);
 
     // Let the browser report a useful loading state while PDF.js fetches the file.
     const interval = setInterval(() => {
