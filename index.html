@@ -5,14 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Colin Ehrentraud — Architecture Portfolio</title>
   <meta name="description" content="Colin Ehrentraud — Architecture Portfolio 2026">
-  <!-- iOS has never supported the Fullscreen API for ordinary page content on
-       iPhone (only for <video>), so a button tap can't hide Safari's chrome
-       there. Launching from a Home Screen icon is the one way iOS actually
-       runs a page with zero browser UI, so these tags make that mode look
-       right when someone does add it. -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#111111">
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -153,29 +145,6 @@
     }
     #exitFullscreen.visible { display: flex; }
     #exitFullscreen:hover { background: rgba(255,255,255,.18); }
-    #fsToast {
-      position: fixed;
-      z-index: 30;
-      left: 50%;
-      bottom: max(80px, calc(66px + env(safe-area-inset-bottom)));
-      transform: translateX(-50%) translateY(8px);
-      max-width: 84vw;
-      padding: 10px 16px;
-      border-radius: 10px;
-      background: rgba(20,20,20,.92);
-      backdrop-filter: blur(10px);
-      color: #fff;
-      font-size: 12.5px;
-      line-height: 1.4;
-      text-align: center;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .25s ease, transform .25s ease;
-    }
-    #fsToast.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
     @media (max-width: 700px), (max-height: 700px) {
       #controls { opacity: .8; }
     }
@@ -196,8 +165,6 @@
   <div id="hint">Click or drag a page to turn it — scroll or pinch to zoom, drag to pan when zoomed</div>
 
   <button id="exitFullscreen" aria-label="Exit full screen">✕</button>
-
-  <div id="fsToast" role="status"></div>
 
   <div id="controls" aria-label="Portfolio controls">
     <button id="first" aria-label="Skip to first page">
@@ -251,7 +218,7 @@
     //
     // In mobile landscape specifically, the reported height still isn't
     // trustworthy enough in practice to guarantee no cropping — so as a
-    // pragmatic safety margin we deliberately size the book to 80% there,
+    // pragmatic safety margin we deliberately size the book to 90% there,
     // giving it slack regardless of exactly how far off the browser's own
     // numbers are. True fullscreen has no toolbar to misreport in the first
     // place, so it skips this and uses the full screen edge-to-edge.
@@ -264,7 +231,7 @@
       const fullscreen = isCurrentlyFullscreen();
       let margin;
       if (small) {
-        margin = (landscape && !fullscreen) ? 0.80 : 1;
+        margin = (landscape && !fullscreen) ? 0.90 : 1;
       } else {
         margin = 0.94;
       }
@@ -408,31 +375,12 @@
     document.getElementById("first").onclick = () => pageFlip?.turnToPage(0);
     document.getElementById("last").onclick = () => pageFlip && pageFlip.flip(pdf.numPages - 1);
 
-    // iOS's Fullscreen API only ever hides browser chrome for <video>
-    // elements on iPhone — Apple has never enabled it for ordinary page
-    // content there (it does work on iPad and desktop Safari). This is a
-    // platform restriction we can't code around, confirmed by years of
-    // open developer requests on Apple's own forums with no resolution.
-    // So: use it where it's actually supported, and where it isn't, tell
-    // people about the one thing that *does* give iPhone a genuinely
-    // chrome-free view — adding the page to the Home Screen — rather than
-    // having the button silently do nothing.
+    // iOS Safari only gained proper Fullscreen API support in 16.4 (spring
+    // 2023) and some older WebKit-based browsers still expect the prefixed
+    // form, so try both. If neither exists, just hide the button — it
+    // wouldn't do anything.
     const fsBtn = document.getElementById("fullscreen");
     const exitFsBtn = document.getElementById("exitFullscreen");
-    const fsToast = document.getElementById("fsToast");
-    let fsToastTimer = null;
-
-    function showFsToast(msg) {
-      fsToast.textContent = msg;
-      fsToast.classList.add("visible");
-      clearTimeout(fsToastTimer);
-      fsToastTimer = setTimeout(() => fsToast.classList.remove("visible"), 4500);
-    }
-
-    function isStandalone() {
-      return window.navigator.standalone === true ||
-        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-    }
 
     function fullscreenSupported() {
       return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
@@ -455,11 +403,9 @@
       try { await exit.call(document); } catch { /* already out, ignore */ }
     }
 
-    if (isStandalone()) {
-      // Launched from the Home Screen icon: already permanently chrome-free,
-      // so there's nothing left for the button to toggle.
+    if (!fullscreenSupported()) {
       fsBtn.style.display = "none";
-    } else if (fullscreenSupported()) {
+    } else {
       fsBtn.onclick = () => (isCurrentlyFullscreen() ? exitFullscreenNow() : enterFullscreen());
       exitFsBtn.onclick = () => exitFullscreenNow();
 
@@ -469,9 +415,6 @@
       };
       document.addEventListener("fullscreenchange", onFullscreenChange);
       document.addEventListener("webkitfullscreenchange", onFullscreenChange);
-    } else {
-      fsBtn.onclick = () =>
-        showFsToast('For a true full-screen view here, tap Share, then "Add to Home Screen."');
     }
 
     window.addEventListener("keydown", (e) => {
