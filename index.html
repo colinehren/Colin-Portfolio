@@ -24,8 +24,6 @@
     #book {
       width: min(94vw, 1200px);
       height: min(94vh, 1696px);
-      height: min(94svh, 1696px);
-      height: min(94dvh, 1696px);
       transform-origin: center center;
       touch-action: none;
     }
@@ -127,12 +125,6 @@
       transition: opacity .4s ease;
     }
     @media (max-width: 700px), (max-height: 700px) {
-      #book {
-        width: 100vw;
-        height: 100vh;
-        height: 100svh;
-        height: 100dvh;
-      }
       #controls { opacity: .8; }
     }
   </style>
@@ -187,6 +179,42 @@
     let pdf;
     let pageFlip;
     let rendering = new Set();
+
+    // CSS viewport units (vh/svh/dvh) turned out not to be trustworthy enough
+    // here: iOS WebKit (Safari and, since it's the same engine under the
+    // hood, Firefox for iOS too) doesn't reliably shrink them to the space
+    // actually left below/above the address bar when there's no scrollable
+    // content around to make it "settle". window.visualViewport exists
+    // specifically to solve this — it reports the real, currently-visible
+    // pixel area, toolbar and all, and iOS keeps it live. We size #book from
+    // that directly instead of relying on CSS to get it right.
+    function sizeBook() {
+      const vv = window.visualViewport;
+      const vw = vv ? vv.width : window.innerWidth;
+      const vh = vv ? vv.height : window.innerHeight;
+      const small = vw <= 700 || vh <= 700;
+      const margin = small ? 1 : 0.94;
+      const w = Math.min(vw * margin, 1200);
+      const h = Math.min(vh * margin, 1696);
+      bookEl.style.width = w + "px";
+      bookEl.style.height = h + "px";
+      // Window's own "resize" event already nudges page-flip's internal
+      // layout, but visualViewport's "resize"/"scroll" events (what actually
+      // fire when the iOS toolbar shows/hides) don't — so tell it directly.
+      pageFlip?.update();
+    }
+
+    sizeBook();
+    window.addEventListener("resize", sizeBook);
+    window.addEventListener("orientationchange", () => {
+      sizeBook();
+      setTimeout(sizeBook, 50);
+      setTimeout(sizeBook, 350);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", sizeBook);
+      window.visualViewport.addEventListener("scroll", sizeBook);
+    }
 
     async function renderPage(index) {
       if (index < 0 || index >= pdf.numPages || rendering.has(index)) return;
@@ -269,10 +297,9 @@
         // — it never looks at the real viewport height. On a narrow, tall
         // phone screen that produces a book far shorter than the screen
         // (looks "not sized to the screen"), and it silently overrides any
-        // CSS/media-query sizing you set on #book. Turning it off lets our
-        // own CSS (with dvh/svh units, so iOS's toolbar doesn't miscalculate
-        // it either) size #book correctly, and page-flip just fits/centers
-        // the page(s) inside whatever box #book actually is.
+        // CSS/JS sizing you set on #book. Turning it off lets sizeBook()
+        // (above) size #book correctly from the real visible viewport, and
+        // page-flip just fits/centers the page(s) inside that box.
         autoSize: false
       });
 
@@ -314,16 +341,6 @@
         await document.exitFullscreen?.();
       }
     };
-
-    // iOS Safari sometimes fires "resize" a beat before the new viewport
-    // dimensions (and dvh/svh values) have actually settled after a
-    // rotation, which can leave page-flip's layout stuck on the old
-    // orientation until something else nudges it. Re-dispatch resize a
-    // couple times shortly after rotation as a cheap, harmless safeguard.
-    window.addEventListener("orientationchange", () => {
-      setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
-      setTimeout(() => window.dispatchEvent(new Event("resize")), 350);
-    });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "ArrowLeft") pageFlip?.flipPrev();
