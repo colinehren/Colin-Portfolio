@@ -24,6 +24,8 @@
     #book {
       width: min(94vw, 1200px);
       height: min(94vh, 1696px);
+      height: min(94svh, 1696px);
+      height: min(94dvh, 1696px);
       transform-origin: center center;
       touch-action: none;
     }
@@ -125,7 +127,12 @@
       transition: opacity .4s ease;
     }
     @media (max-width: 700px), (max-height: 700px) {
-      #book { width: 100vw; height: 100vh; }
+      #book {
+        width: 100vw;
+        height: 100vh;
+        height: 100svh;
+        height: 100dvh;
+      }
       #controls { opacity: .8; }
     }
   </style>
@@ -255,7 +262,18 @@
         flippingTime: 450,
         usePortrait: true,
         startPage: 0,
-        maxShadowOpacity: 0.25
+        maxShadowOpacity: 0.25,
+        // Critical: with autoSize (the library default: true), page-flip
+        // overwrites #book's CSS with its own inline width:100% and derives
+        // the book's height purely from that width via an aspect-ratio trick
+        // — it never looks at the real viewport height. On a narrow, tall
+        // phone screen that produces a book far shorter than the screen
+        // (looks "not sized to the screen"), and it silently overrides any
+        // CSS/media-query sizing you set on #book. Turning it off lets our
+        // own CSS (with dvh/svh units, so iOS's toolbar doesn't miscalculate
+        // it either) size #book correctly, and page-flip just fits/centers
+        // the page(s) inside whatever box #book actually is.
+        autoSize: false
       });
 
       pageFlip.loadFromHTML(document.querySelectorAll(".page"));
@@ -296,6 +314,16 @@
         await document.exitFullscreen?.();
       }
     };
+
+    // iOS Safari sometimes fires "resize" a beat before the new viewport
+    // dimensions (and dvh/svh values) have actually settled after a
+    // rotation, which can leave page-flip's layout stuck on the old
+    // orientation until something else nudges it. Re-dispatch resize a
+    // couple times shortly after rotation as a cheap, harmless safeguard.
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 350);
+    });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "ArrowLeft") pageFlip?.flipPrev();
