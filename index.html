@@ -89,6 +89,7 @@
       padding: 7px 10px;
       border-radius: 999px;
       background: rgba(20,20,20,.82);
+      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
       opacity: .10;
       transition: opacity .25s ease;
@@ -137,6 +138,7 @@
       height: 40px;
       border-radius: 50%;
       background: rgba(20,20,20,.75);
+      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
       color: #fff;
       border: 0;
@@ -258,7 +260,7 @@
       // Window's own "resize" event already nudges page-flip's internal
       // layout, but visualViewport's "resize"/"scroll" events (what actually
       // fire when the iOS toolbar shows/hides) don't — so tell it directly.
-      pageFlip?.update();
+      pageFlip && pageFlip.update();
     }
 
     sizeBook();
@@ -337,14 +339,19 @@
         width: 595,
         height: 842,
         size: "stretch",
-        // These act as a hard floor: page-flip will render at least this big
-        // regardless of how small #book actually is, and nothing here clips
-        // the overflow. A phone's real usable height in landscape (after the
-        // browser's toolbar) is very often under ~350px — well below the old
-        // 396 floor — so the book was being forced taller than the container
-        // and spilling off the top/bottom of the screen. Set low enough that
-        // it never binds on a real device; same aspect ratio as the page.
-        minWidth: 150,
+        // minHeight acts as a hard floor: page-flip renders at least this
+        // tall regardless of how short #book actually is, and nothing here
+        // clips the overflow. A phone's real usable height in landscape
+        // (after the browser's toolbar) is very often under ~350px — well
+        // below the old 396 floor — so the book was being forced taller
+        // than the container and spilling off the top/bottom of the screen.
+        // minWidth is unrelated to that: it's what page-flip compares
+        // against to decide single-page vs. two-page-spread (spread once
+        // the container is roughly 2×minWidth or wider), so it's kept at
+        // its original value — a typical phone in portrait (~350–430px) is
+        // comfortably under 2×280=560 (single page), while landscape
+        // (~700–900px) comfortably clears it (spread).
+        minWidth: 280,
         maxWidth: 1200,
         minHeight: 212,
         maxHeight: 1696,
@@ -391,11 +398,11 @@
       }, 4500);
     }
 
-    document.getElementById("prev").onclick = () => pageFlip?.flipPrev();
-    document.getElementById("next").onclick = () => pageFlip?.flipNext();
+    document.getElementById("prev").onclick = () => pageFlip && pageFlip.flipPrev();
+    document.getElementById("next").onclick = () => pageFlip && pageFlip.flipNext();
     // flip() can be unreliable jumping many pages backward to the cover, so use
     // the library's instant turnToPage for the skip-to-first control.
-    document.getElementById("first").onclick = () => pageFlip?.turnToPage(0);
+    document.getElementById("first").onclick = () => pageFlip && pageFlip.turnToPage(0);
     document.getElementById("last").onclick = () => pageFlip && pageFlip.flip(pdf.numPages - 1);
 
     // iOS Safari only gained proper Fullscreen API support in 16.4 (spring
@@ -441,8 +448,8 @@
     }
 
     window.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft") pageFlip?.flipPrev();
-      if (e.key === "ArrowRight") pageFlip?.flipNext();
+      if (e.key === "ArrowLeft") pageFlip && pageFlip.flipPrev();
+      if (e.key === "ArrowRight") pageFlip && pageFlip.flipNext();
       if (e.key === "f" || e.key === "F") document.getElementById("fullscreen").click();
     });
 
