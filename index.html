@@ -90,10 +90,10 @@
       border-radius: 999px;
       background: rgba(20,20,20,.82);
       backdrop-filter: blur(10px);
-      opacity: .15;
+      opacity: .10;
       transition: opacity .25s ease;
     }
-    #controls:hover, #controls:focus-within { opacity: 1; }
+    #controls:hover, #controls:focus-within, #controls.active { opacity: .8; }
     button {
       border: 0;
       background: transparent;
@@ -146,8 +146,12 @@
     }
     #exitFullscreen.visible { display: flex; }
     #exitFullscreen:hover { background: rgba(255,255,255,.18); }
-    @media (max-width: 700px), (max-height: 700px) {
-      #controls { opacity: .8; }
+    /* Mobile landscape: a phone's short landscape height leaves little room,
+       so hide the nav bar entirely rather than have it float over the page.
+       The max-height threshold targets phones specifically, not landscape
+       tablets/laptops (which have much more vertical space to spare). */
+    @media (orientation: landscape) and (max-height: 500px) {
+      #controls { display: none; }
     }
   </style>
 </head>
@@ -199,6 +203,17 @@
     const bar = document.getElementById("bar");
     const bookEl = document.getElementById("book");
     const counter = document.getElementById("counter");
+    const controlsEl = document.getElementById("controls");
+
+    // Tap-to-reveal the nav bar on touch devices. Deliberately separate from
+    // desktop's :hover/:focus-within CSS (which needs no JS at all) — this
+    // only reacts to touch input, so a mouse click doesn't leave the bar
+    // forced open the way a tap does. Tapping inside keeps it revealed;
+    // tapping anywhere else (including on the page itself) hides it again.
+    document.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      controlsEl.classList.toggle("active", controlsEl.contains(e.target));
+    });
 
     let pdf;
     let pageFlip;
