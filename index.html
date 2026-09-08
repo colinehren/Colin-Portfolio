@@ -16,6 +16,7 @@
     #viewer {
       position: fixed;
       inset: 0;
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -321,9 +322,16 @@
         width: 595,
         height: 842,
         size: "stretch",
-        minWidth: 280,
+        // These act as a hard floor: page-flip will render at least this big
+        // regardless of how small #book actually is, and nothing here clips
+        // the overflow. A phone's real usable height in landscape (after the
+        // browser's toolbar) is very often under ~350px — well below the old
+        // 396 floor — so the book was being forced taller than the container
+        // and spilling off the top/bottom of the screen. Set low enough that
+        // it never binds on a real device; same aspect ratio as the page.
+        minWidth: 150,
         maxWidth: 1200,
-        minHeight: 396,
+        minHeight: 212,
         maxHeight: 1696,
         showCover: true,
         mobileScrollSupport: false,
